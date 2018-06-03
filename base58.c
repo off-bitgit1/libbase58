@@ -5,22 +5,31 @@
  * under the terms of the standard MIT license.  See COPYING for more details.
  */
 
-#ifndef WIN32
+#include "libbase58.h"
+
+#ifndef _WIN32
 #include <arpa/inet.h>
 #else
 #include <winsock2.h>
 #include <malloc.h>
-#endif
 
+#include <stdio.h>
+
+#ifdef _WIN64
+typedef int64_t ssize_t;
+#else
+typedef int32_t ssize_t;
+#endif
+#endif
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+
 #include <sys/types.h>
 
-#include "libbase58.h"
+
 
 bool (*b58_sha256_impl)(void *, const void *, size_t) = NULL;
 
@@ -40,11 +49,11 @@ typedef uint32_t b58_almostmaxint_t;
 #define b58_almostmaxint_bits (sizeof(b58_almostmaxint_t) * 8)
 static const b58_almostmaxint_t b58_almostmaxint_mask = ((((b58_maxint_t)1) << b58_almostmaxint_bits) - 1);
 
-#define b58_log_err(msg, ...) applog(LOG_ERR, "[" __FUNCTION__ " - ERROR]: " msg, __VA_ARGS__)
-
-/*	MSVC 2013 doesn't support the GCC (and probably clang) extension
-	for dynamic arrays in C	*/
+//	MSVC 2013 doesn't support the GCC (and probably clang) extension
+//	for dynamic arrays in C
 #ifdef _WIN32
+#define b58_log_err(msg, ...) printf("[" __FUNCTION__ " - ERROR]: " msg, __VA_ARGS__)
+
 #define b58_alloc_mem(type, name, count)					\
 	type *name = NULL;										\
 	do {													\
@@ -62,9 +71,8 @@ static const b58_almostmaxint_t b58_almostmaxint_mask = ((((b58_maxint_t)1) << b
 		}					\
 	} while (0)
 #else
-/* not sure if this compiles */
 #define b58_alloc_mem(type, name, count) type name[count]
-#define b58_free_mem
+#define b58_free_mem(v)
 #endif
 
 bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
@@ -74,7 +82,7 @@ bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
 	unsigned char *binu = bin;
 	size_t outisz = (binsz + sizeof(b58_almostmaxint_t) - 1) / sizeof(b58_almostmaxint_t);
 
-	/*b58_almostmaxint_t outi[outisz];*/
+	// b58_almostmaxint_t outi[outisz];
 
 	b58_alloc_mem(b58_almostmaxint_t, outi, outisz);
 
@@ -193,7 +201,7 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz)
 		++zcount;
 
 	size = (binsz - zcount) * 138 / 100 + 1;
-	/*uint8_t buf[size];*/
+	//uint8_t buf[size];
 
 	b58_alloc_mem(uint8_t, buf, size);
 	memset(buf, 0, size);
@@ -233,7 +241,7 @@ error:
 
 bool b58check_enc(char *b58c, size_t *b58c_sz, uint8_t ver, const void *data, size_t datasz)
 {
-	/*uint8_t buf[1 + datasz + 0x20];*/
+	//uint8_t buf[1 + datasz + 0x20];
 
 	b58_alloc_mem(uint8_t, buf, 1 + datasz + 0x20);
 
