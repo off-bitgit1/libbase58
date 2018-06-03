@@ -5,19 +5,25 @@
  * under the terms of the standard MIT license.  See COPYING for more details.
  */
 
-#ifndef WIN32
+#include "libbase58.h"
+
+#ifndef _WIN32
 #include <arpa/inet.h>
 #else
 #include <winsock2.h>
+#ifdef _MSC_VER
+#include <malloc.h>
+#include <stdio.h>
+#endif
 #endif
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <string.h>
-#include <sys/types.h>
+#include <stdlib.h>
+#include <stdint.h>
 
-#include "libbase58.h"
+#include <sys/types.h>
 
 bool (*b58_sha256_impl)(void *, const void *, size_t) = NULL;
 
@@ -37,39 +43,68 @@ typedef uint32_t b58_almostmaxint_t;
 #define b58_almostmaxint_bits (sizeof(b58_almostmaxint_t) * 8)
 static const b58_almostmaxint_t b58_almostmaxint_mask = ((((b58_maxint_t)1) << b58_almostmaxint_bits) - 1);
 
+//	MSVC 2017 C99 doesn't support dynamic arrays in C
+#ifdef _MSC_VER
+#define b58_log_err(msg, ...) printf("[" __FUNCTION__ " - ERROR]: " msg, __VA_ARGS__)
+
+#define b58_alloc_mem(type, name, count)							\
+	type *name = NULL;																	\
+	do {																								\
+		name = _malloca(count * sizeof(type));						\
+		if (!name) {																			\
+			b58_log_err("%s", "Could not allocate " #name);	\
+			return false;																		\
+		}																									\
+	} while (0)
+
+#define b58_free_mem(v)														\
+	do {																						\
+		if ((v)) {																		\
+			_freea((v));																\
+		}																							\
+	} while (0)
+#else
+#define b58_alloc_mem(type, name, count) type name[count]
+#define b58_free_mem(v)
+#endif
+
 bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
 {
 	size_t binsz = *binszp;
 	const unsigned char *b58u = (void*)b58;
 	unsigned char *binu = bin;
 	size_t outisz = (binsz + sizeof(b58_almostmaxint_t) - 1) / sizeof(b58_almostmaxint_t);
-	b58_almostmaxint_t outi[outisz];
+
+	// b58_almostmaxint_t outi[outisz];
+
+	b58_alloc_mem(b58_almostmaxint_t, outi, outisz);
+
 	b58_maxint_t t;
 	b58_almostmaxint_t c;
 	size_t i, j;
 	uint8_t bytesleft = binsz % sizeof(b58_almostmaxint_t);
 	b58_almostmaxint_t zeromask = bytesleft ? (b58_almostmaxint_mask << (bytesleft * 8)) : 0;
 	unsigned zerocount = 0;
-	
+
 	if (!b58sz)
 		b58sz = strlen(b58);
-	
+
 	for (i = 0; i < outisz; ++i) {
 		outi[i] = 0;
 	}
-	
+
 	// Leading zeros, just count
 	for (i = 0; i < b58sz && b58u[i] == '1'; ++i)
 		++zerocount;
-	
+
 	for ( ; i < b58sz; ++i)
 	{
 		if (b58u[i] & 0x80)
 			// High-bit set on invalid digit
-			return false;
+			goto ret_false;
 		if (b58digits_map[b58u[i]] == -1)
 			// Invalid base58 digit
-			return false;
+			goto ret_false;
 		c = (unsigned)b58digits_map[b58u[i]];
 		for (j = outisz; j--; )
 		{
@@ -79,12 +114,12 @@ bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
 		}
 		if (c)
 			// Output number too big (carry to the next int32)
-			return false;
+			goto ret_false;
 		if (outi[0] & zeromask)
 			// Output number too big (last int32 filled too far)
-			return false;
+			goto ret_false;
 	}
-	
+
 	j = 0;
 	if (bytesleft) {
 		for (i = bytesleft; i > 0; --i) {
@@ -92,14 +127,14 @@ bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
 		}
 		++j;
 	}
-	
+
 	for (; j < outisz; ++j)
 	{
 		for (i = sizeof(*outi); i > 0; --i) {
 			*(binu++) = (outi[j] >> (8 * (i - 1))) & 0xff;
 		}
 	}
-	
+
 	// Count canonical base58 byte count
 	binu = bin;
 	for (i = 0; i < binsz; ++i)
@@ -109,8 +144,13 @@ bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
 		--*binszp;
 	}
 	*binszp += zerocount;
-	
+
+	b58_free_mem(outi);
 	return true;
+
+ret_false:
+	b58_free_mem(outi);
+	return false;
 }
 
 static
@@ -131,13 +171,13 @@ int b58check(const void *bin, size_t binsz, const char *base58str, size_t b58sz)
 		return -2;
 	if (memcmp(&binc[binsz - 4], buf, 4))
 		return -1;
-	
+
 	// Check number of zeros is correct AFTER verifying checksum (to avoid possibility of accessing base58str beyond the end)
 	for (i = 0; binc[i] == '\0' && base58str[i] == '1'; ++i)
 	{}  // Just finding the end of zeros, nothing to do in loop
 	if (binc[i] == '\0' || base58str[i] == '1')
 		return -3;
-	
+
 	return binc[0];
 }
 
@@ -147,16 +187,18 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz)
 {
 	const uint8_t *bin = data;
 	int carry;
-	ssize_t i, j, high, zcount = 0;
+	size_t i, j, high, zcount = 0;
 	size_t size;
-	
+
 	while (zcount < binsz && !bin[zcount])
 		++zcount;
-	
+
 	size = (binsz - zcount) * 138 / 100 + 1;
-	uint8_t buf[size];
+	//uint8_t buf[size];
+
+	b58_alloc_mem(uint8_t, buf, size);
 	memset(buf, 0, size);
-	
+
 	for (i = zcount, high = size - 1; i < binsz; ++i, high = j)
 	{
 		for (carry = bin[i], j = size - 1; (j > high) || carry; --j)
@@ -164,39 +206,55 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz)
 			carry += 256 * buf[j];
 			buf[j] = carry % 58;
 			carry /= 58;
+			if (!j) {
+				// Otherwise j wraps to maxint which is > high
+				break;
+			}
 		}
 	}
-	
+
 	for (j = 0; j < size && !buf[j]; ++j);
-	
+
 	if (*b58sz <= zcount + size - j)
 	{
 		*b58sz = zcount + size - j + 1;
-		return false;
+
+		goto error;
 	}
-	
+
 	if (zcount)
 		memset(b58, '1', zcount);
 	for (i = zcount; j < size; ++i, ++j)
 		b58[i] = b58digits_ordered[buf[j]];
 	b58[i] = '\0';
 	*b58sz = i + 1;
-	
+
 	return true;
+
+error:
+	b58_free_mem(buf);
+	return false;
 }
 
 bool b58check_enc(char *b58c, size_t *b58c_sz, uint8_t ver, const void *data, size_t datasz)
 {
-	uint8_t buf[1 + datasz + 0x20];
+	//uint8_t buf[1 + datasz + 0x20];
+
+	b58_alloc_mem(uint8_t, buf, 1 + datasz + 0x20);
+
 	uint8_t *hash = &buf[1 + datasz];
-	
+
 	buf[0] = ver;
 	memcpy(&buf[1], data, datasz);
 	if (!my_dblsha256(hash, buf, datasz + 1))
 	{
 		*b58c_sz = 0;
+
+		b58_free_mem(buf);
 		return false;
 	}
-	
-	return b58enc(b58c, b58c_sz, buf, 1 + datasz + 4);
+
+	bool rc = b58enc(b58c, b58c_sz, buf, 1 + datasz + 4);
+	b58_free_mem(buf);
+	return rc;
 }
