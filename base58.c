@@ -11,15 +11,17 @@
 #include <arpa/inet.h>
 #else
 #include <winsock2.h>
+#ifdef _MSC_VER
 #include <malloc.h>
-
 #include <stdio.h>
+#endif
 #endif
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 #include <sys/types.h>
 
@@ -41,26 +43,25 @@ typedef uint32_t b58_almostmaxint_t;
 #define b58_almostmaxint_bits (sizeof(b58_almostmaxint_t) * 8)
 static const b58_almostmaxint_t b58_almostmaxint_mask = ((((b58_maxint_t)1) << b58_almostmaxint_bits) - 1);
 
-//	MSVC 2017 doesn't support the GCC (and probably clang) extension
-//	for dynamic arrays in C
-#ifdef _WIN32
+//	MSVC 2017 C99 doesn't support dynamic arrays in C
+#ifdef _MSC_VER
 #define b58_log_err(msg, ...) printf("[" __FUNCTION__ " - ERROR]: " msg, __VA_ARGS__)
 
-#define b58_alloc_mem(type, name, count)					\
-	type *name = NULL;										\
-	do {													\
-		name = calloc(count, sizeof(type));					\
-		if (!name) {										\
+#define b58_alloc_mem(type, name, count)							\
+	type *name = NULL;																	\
+	do {																								\
+		name = _malloca(count * sizeof(type));						\
+		if (!name) {																			\
 			b58_log_err("%s", "Could not allocate " #name);	\
-			return false;									\
-		}													\
+			return false;																		\
+		}																									\
 	} while (0)
 
-#define b58_free_mem(v)		\
-	do {					\
-		if ((v)) {			\
-			free((v));		\
-		}					\
+#define b58_free_mem(v)														\
+	do {																						\
+		if ((v)) {																		\
+			_freea((v));																\
+		}																							\
 	} while (0)
 #else
 #define b58_alloc_mem(type, name, count) type name[count]
