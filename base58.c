@@ -49,7 +49,7 @@ typedef uint32_t b58_almostmaxint_t;
 #define b58_almostmaxint_bits (sizeof(b58_almostmaxint_t) * 8)
 static const b58_almostmaxint_t b58_almostmaxint_mask = ((((b58_maxint_t)1) << b58_almostmaxint_bits) - 1);
 
-//	MSVC 2013 doesn't support the GCC (and probably clang) extension
+//	MSVC 2017 doesn't support the GCC (and probably clang) extension
 //	for dynamic arrays in C
 #ifdef _WIN32
 #define b58_log_err(msg, ...) printf("[" __FUNCTION__ " - ERROR]: " msg, __VA_ARGS__)
