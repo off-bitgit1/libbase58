@@ -5,10 +5,14 @@
  * under the terms of the standard MIT license.  See COPYING for more details.
  */
 
-#ifndef WIN32
+#ifndef _WIN32
 #include <arpa/inet.h>
 #else
 #include <winsock2.h>
+#endif
+
+#ifdef _MSC_VER
+#include <malloc.h>
 #endif
 
 #include <stdbool.h>
@@ -36,13 +40,35 @@ typedef uint32_t b58_almostmaxint_t;
 #define b58_almostmaxint_bits (sizeof(b58_almostmaxint_t) * 8)
 static const b58_almostmaxint_t b58_almostmaxint_mask = ((((b58_maxint_t)1) << b58_almostmaxint_bits) - 1);
 
+//	MSVC 2017 C99 doesn't support dynamic arrays in C
+#ifdef _MSC_VER
+#define b58_alloc_mem(type, name, count) \
+	type *name = NULL; \
+	do { \
+		name = _malloca(count * sizeof(type)); \
+		if (!name) { \
+			return false; \
+		} \
+	} while (0)
+
+#define b58_free_mem(v) \
+	do { \
+		if ((v)) { \
+			_freea((v)); \
+		} \
+	} while (0)
+#else
+#define b58_alloc_mem(type, name, count) type name[count]
+#define b58_free_mem(v)
+#endif
+
 bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
 {
 	size_t binsz = *binszp;
 	const unsigned char *b58u = (void*)b58;
 	unsigned char *binu = bin;
 	size_t outisz = (binsz + sizeof(b58_almostmaxint_t) - 1) / sizeof(b58_almostmaxint_t);
-	b58_almostmaxint_t outi[outisz];
+	b58_alloc_mem(b58_almostmaxint_t, outi, outisz);
 	b58_maxint_t t;
 	b58_almostmaxint_t c;
 	size_t i, j;
@@ -63,12 +89,16 @@ bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
 	
 	for ( ; i < b58sz; ++i)
 	{
-		if (b58u[i] & 0x80)
+		if (b58u[i] & 0x80) {
 			// High-bit set on invalid digit
+			b58_free_mem(outi);
 			return false;
-		if (b58digits_map[b58u[i]] == -1)
+		}
+		if (b58digits_map[b58u[i]] == -1) {
 			// Invalid base58 digit
+			b58_free_mem(outi);
 			return false;
+		}
 		c = (unsigned)b58digits_map[b58u[i]];
 		for (j = outisz; j--; )
 		{
@@ -76,12 +106,16 @@ bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
 			c = t >> b58_almostmaxint_bits;
 			outi[j] = t & b58_almostmaxint_mask;
 		}
-		if (c)
+		if (c) {
 			// Output number too big (carry to the next int32)
+			b58_free_mem(outi);
 			return false;
-		if (outi[0] & zeromask)
+		}
+		if (outi[0] & zeromask) {
 			// Output number too big (last int32 filled too far)
+			b58_free_mem(outi);
 			return false;
+		}
 	}
 	
 	j = 0;
@@ -109,6 +143,7 @@ bool b58tobin(void *bin, size_t *binszp, const char *b58, size_t b58sz)
 	}
 	*binszp += zerocount;
 	
+	b58_free_mem(outi);
 	return true;
 }
 
@@ -153,7 +188,7 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz)
 		++zcount;
 	
 	size = (binsz - zcount) * 138 / 100 + 1;
-	uint8_t buf[size];
+	b58_alloc_mem(uint8_t, buf, size);
 	memset(buf, 0, size);
 	
 	for (i = zcount, high = size - 1; i < binsz; ++i, high = j)
@@ -175,6 +210,7 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz)
 	if (*b58sz <= zcount + size - j)
 	{
 		*b58sz = zcount + size - j + 1;
+		b58_free_mem(buf);
 		return false;
 	}
 	
@@ -185,12 +221,13 @@ bool b58enc(char *b58, size_t *b58sz, const void *data, size_t binsz)
 	b58[i] = '\0';
 	*b58sz = i + 1;
 	
+	b58_free_mem(buf);
 	return true;
 }
 
 bool b58check_enc(char *b58c, size_t *b58c_sz, uint8_t ver, const void *data, size_t datasz)
 {
-	uint8_t buf[1 + datasz + 0x20];
+	b58_alloc_mem(uint8_t, buf, 1 + datasz + 0x20);
 	uint8_t *hash = &buf[1 + datasz];
 	
 	buf[0] = ver;
@@ -198,8 +235,10 @@ bool b58check_enc(char *b58c, size_t *b58c_sz, uint8_t ver, const void *data, si
 	if (!my_dblsha256(hash, buf, datasz + 1))
 	{
 		*b58c_sz = 0;
+		b58_free_mem(buf);
 		return false;
 	}
 	
+	b58_free_mem(buf);
 	return b58enc(b58c, b58c_sz, buf, 1 + datasz + 4);
 }
