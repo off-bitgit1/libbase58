@@ -1,4 +1,6 @@
-Initialisation
+## [bitcoin/libbase58](https://github.com/bitcoin/libbase58)
+
+Initialization
 --------------
 
 Before you can use libbase58 for base58check, you must provide a SHA256
